@@ -38,7 +38,8 @@ namespace LibUA
 
                 dispatchers = new List<NetDispatcherBase>();
             }
-
+            //TODO: Need state like in OPC foundation UA server
+            public bool IsRunning  () => listener!= null;
             public void Start()
             {
                 Start(IPAddress.Any);
