@@ -120,7 +120,13 @@ public class Coding
         if (type == VariantType.LocalizedText) { return typeof(LocalizedText); }
         if (type == VariantType.String) { return typeof(String); }
         if (type == VariantType.ExtensionObject) { return typeof(ExtensionObject); }
-
+        if (type == VariantType.DataValue) { return typeof(DataValue); }
+        if (type == VariantType.Variant) { return typeof(Variant); }
+        if (type == VariantType.DiagnosticInfo) { return typeof(DiagnosticInfo); }
+        if (type == VariantType.Number) { return typeof(Number); }
+        if (type == VariantType.Integer) { return typeof(Integer); }
+        if (type == VariantType.UInteger) { return typeof(UInteger); }
+        if (type == VariantType.Enumeration) { return typeof(Enumeration); }
         // TODO: Other types
 
         return null;
@@ -147,7 +153,13 @@ public class Coding
         if (obj is DateTime) { return VariantType.DateTime; }
         if (obj is StatusCode) { return VariantType.StatusCode; }
         if (obj is ExtensionObject) { return VariantType.ExtensionObject; }
-
+        if (obj is VariantType.DataValue) { return VariantType.DataValue; }
+        if (obj is VariantType.Variant) { return VariantType.Variant; }
+        if (obj is VariantType.DiagnosticInfo){return VariantType.DiagnosticInfo; }
+        if (obj is VariantType.Number) { return VariantType.Number; }
+        if (obj is VariantType.Integer) { return VariantType.Integer; }
+        if (obj is VariantType.UInteger) { return VariantType.UInteger; }
+        if (obj is VariantType.Enumeration) { return VariantType.Enumeration; }
         // TODO: Other types
 
         return VariantType.Null;
