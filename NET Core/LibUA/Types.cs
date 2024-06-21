@@ -7399,16 +7399,22 @@ namespace LibUA
         public class Variant
         {
             public object Value { get; set; }
+            //TODO: Add Variant
         }
         public class DiagnosticInfo{
+            //TODO: Add DiagnosticInfo
         }
         public class Number{
+            ///TODO: Add Number
         }
         public class Integer{
+            //TTODO: Add Integer
         }
         public class UInteger{
+            //TODO: Add UInteger
         }
         public class Enumeration{
+            //TODO: Add Enumeration
         }
     }
 }
