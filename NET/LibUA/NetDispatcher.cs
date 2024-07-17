@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using LibUA.Core;
+using Microsoft.Extensions.Logging;
 using static LibUA.Security.Cryptography.CapiNative;
 
 namespace LibUA
@@ -666,7 +667,9 @@ namespace LibUA
                 reqHeader.SecurityRequestID = securityReqId;
                 reqHeader.SecuritySequenceNum = securitySeqNum;
 
-                if (config.AuthToken != null && !reqHeader.AuthToken.Equals(config.AuthToken))
+                if (config.AuthToken != null
+                    && !reqHeader.AuthToken.Equals(config.AuthToken)
+                    && typeId.NumericIdentifier != (uint)RequestCode.CloseSecureChannelRequest)
                 {
                     logger?.Log(LogLevel.Error, string.Format("{0}: Bad auth token {1}, expected {2}", LoggerID(), reqHeader.AuthToken.ToString(), config.AuthToken.ToString()));
 
@@ -674,7 +677,7 @@ namespace LibUA
                     return ErrorInternal;
                 }
 
-                logger?.Log(LogLevel.Info, string.Format("{0}: Message type {1} with SL state {2}", LoggerID(), typeId.ToString(), config.SLState.ToString()));
+                logger?.Log(LogLevel.Information, string.Format("{0}: Message type {1} with SL state {2}", LoggerID(), typeId.ToString(), config.SLState.ToString()));
 
                 if (typeId.NamespaceIndex == 0)
                 {
@@ -687,9 +690,7 @@ namespace LibUA
 
                             case (uint)RequestCode.CreateSessionRequest: return DispatchMessage_CreateSessionRequest(config, reqHeader, recvBuf, messageSize);
                             case (uint)RequestCode.ActivateSessionRequest: return DispatchMessage_ActivateSessionRequest(config, reqHeader, recvBuf, messageSize);
-                            case (uint)RequestCode.CloseSessionRequest:
-                                logger?.Log(LogLevel.Info, string.Format("{0}: Client sent CloseSessionRequest", LoggerID()));
-                                return ErrorClosed;
+                            case (uint)RequestCode.CloseSessionRequest: return DispatchMessage_CloseSessionRequest(config, reqHeader, recvBuf, messageSize);
 
                             case (uint)RequestCode.ReadRequest: return DispatchMessage_ReadRequest(config, reqHeader, recvBuf, messageSize);
                             case (uint)RequestCode.HistoryReadRequest: return DispatchMessage_HistoryReadRequest(config, reqHeader, recvBuf, messageSize);
@@ -701,6 +702,7 @@ namespace LibUA
 
                             case (uint)RequestCode.CallRequest: return DispatchMessage_CallRequest(config, reqHeader, recvBuf, messageSize);
                             case (uint)RequestCode.RegisterNodesRequest: return DispatchMessage_RegisterNodesRequest(config, reqHeader, recvBuf, messageSize);
+                            case (uint)RequestCode.UnregisterNodesRequest: return DispatchMessage_UnregisterNodesRequest(config, reqHeader, recvBuf, messageSize);
 
                             case (uint)RequestCode.CreateSubscriptionRequest: return DispatchMessage_CreateSubscriptionRequest(config, reqHeader, recvBuf, messageSize);
                             case (uint)RequestCode.SetPublishingModeRequest: return DispatchMessage_SetPublishingModeRequest(config, reqHeader, recvBuf, messageSize);
@@ -716,9 +718,7 @@ namespace LibUA
                             case (uint)RequestCode.PublishRequest: return DispatchMessage_PublishRequest(config, reqHeader, recvBuf, messageSize);
                             case (uint)RequestCode.RepublishRequest: return DispatchMessage_RepublishRequest(config, reqHeader, recvBuf, messageSize);
 
-                            case (uint)RequestCode.CloseSecureChannelRequest:
-                                logger?.Log(LogLevel.Info, string.Format("{0}: Client sent CloseSecureChannelRequest", LoggerID()));
-                                return ErrorClosed;
+                            case (uint)RequestCode.CloseSecureChannelRequest: return DispatchMessage_CloseSecureChannelRequest(config, reqHeader, recvBuf, messageSize);
                         }
                     }
                     else
@@ -730,13 +730,9 @@ namespace LibUA
 
                             case (uint)RequestCode.CreateSessionRequest: return DispatchMessage_CreateSessionRequest(config, reqHeader, recvBuf, messageSize);
                             case (uint)RequestCode.ActivateSessionRequest: return DispatchMessage_ActivateSessionRequest(config, reqHeader, recvBuf, messageSize);
-                            case (uint)RequestCode.CloseSessionRequest:
-                                logger?.Log(LogLevel.Info, string.Format("{0}: Client sent CloseSessionRequest", LoggerID()));
-                                return ErrorClosed;
+                            case (uint)RequestCode.CloseSessionRequest: return DispatchMessage_CloseSessionRequest(config, reqHeader, recvBuf, messageSize);
 
-                            case (uint)RequestCode.CloseSecureChannelRequest:
-                                logger?.Log(LogLevel.Info, string.Format("{0}: Client sent CloseSecureChannelRequest", LoggerID()));
-                                return ErrorClosed;
+                            case (uint)RequestCode.CloseSecureChannelRequest: return DispatchMessage_CloseSecureChannelRequest(config, reqHeader, recvBuf, messageSize);
 
                             default:
                                 break;
@@ -1035,6 +1031,49 @@ namespace LibUA
 
                 DispatchMessage_SecureAndSend(config, respBuf);
                 return (int)messageSize;
+            }
+
+            /// <summary>
+            /// Handle CloseSessionRequest as per
+            /// https://reference.opcfoundation.org/Core/Part4/docs/5.6.4
+            /// </summary>
+            /// <param name="config"></param>
+            /// <param name="reqHeader"></param>
+            /// <param name="recvBuf"></param>
+            /// <param name="messageSize"></param>
+            /// <returns></returns>
+            protected int DispatchMessage_CloseSessionRequest(SLChannel config, RequestHeader reqHeader, MemoryBuffer recvBuf, uint messageSize)
+            {
+                if (!recvBuf.Decode(out bool deleteSubscriptions)) { return ErrorParseFail; }
+
+                var respBuf = new MemoryBuffer(maximumMessageSize);
+                bool succeeded = DispatchMessage_WriteHeader(config, respBuf,
+                    (uint)RequestCode.CloseSessionResponse, reqHeader, (uint)StatusCode.Good);
+                if (!succeeded)
+                {
+                    return ErrorRespWrite;
+                }
+
+                DispatchMessage_SecureAndSend(config, respBuf);
+                logger?.Log(LogLevel.Information, "{LoggerID}: Client sent CloseSessionRequest, deleteSubscriptions = {deleteSubscriptions}", LoggerID(), deleteSubscriptions);
+                //return ErrorClosed;
+                return (int) messageSize;
+            }
+
+            /// <summary>
+            /// Handle CloseSecureChannelRequest
+            /// https://reference.opcfoundation.org/Core/Part6/docs/7.1.4
+            /// https://reference.opcfoundation.org/Core/Part4/docs/5.5.3
+            /// </summary>
+            /// <param name="config"></param>
+            /// <param name="reqHeader"></param>
+            /// <param name="recvBuf"></param>
+            /// <param name="messageSize"></param>
+            /// <returns></returns>
+            protected int DispatchMessage_CloseSecureChannelRequest(SLChannel config, RequestHeader reqHeader, MemoryBuffer recvBuf, uint messageSize)
+            {
+                logger?.Log(LogLevel.Information, "{LoggerID}: Client sent CloseSecureChannelRequest, secureChannelId={secureChannelId}", LoggerID(), config.ChannelID);
+                return ErrorClosed;
             }
 
             protected int DispatchMessage_FindServersRequest(SLChannel config, RequestHeader reqHeader, MemoryBuffer recvBuf, uint messageSize)
@@ -1489,7 +1528,7 @@ namespace LibUA
                         RequestId = requestId
                     };
 
-                    logger?.Log(LogLevel.Info, string.Format("{0}: SL security token {1} issued for channel {2} with security policy {3}", LoggerID(), config.TokenID, config.ChannelID, config.SecurityPolicy.ToString()));
+                    logger?.Log(LogLevel.Information, string.Format("{0}: SL security token {1} issued for channel {2} with security policy {3}", LoggerID(), config.TokenID, config.ChannelID, config.SecurityPolicy.ToString()));
                 }
                 else if (securityTokenRequestType == (uint)SecurityTokenRequestType.Renew)
                 {
@@ -1510,7 +1549,7 @@ namespace LibUA
 
                     reqHeader.SecurityTokenID = config.TokenID;
 
-                    logger?.Log(LogLevel.Info, string.Format("{0}: SL security token {1} renewed for channel {2} with security policy {3}, previous token was {4}", LoggerID(), config.TokenID, config.ChannelID, config.SecurityPolicy.ToString(), config.PrevTokenID.ToString()));
+                    logger?.Log(LogLevel.Information, string.Format("{0}: SL security token {1} renewed for channel {2} with security policy {3}, previous token was {4}", LoggerID(), config.TokenID, config.ChannelID, config.SecurityPolicy.ToString(), config.PrevTokenID.ToString()));
 
                     foreach (var sub in subscriptionMap.Values)
                     {
@@ -1700,15 +1739,6 @@ namespace LibUA
                 }
 
                 config.TL = new TLConnection();
-                const uint chunkSize = (1 << 16) - 1;
-                config.TL.LocalConfig = new TLConfiguration()
-                {
-                    ProtocolVersion = 0,
-                    SendBufferSize = chunkSize,
-                    RecvBufferSize = chunkSize,
-                    MaxMessageSize = (uint)maximumMessageSize,
-                    MaxChunkCount = (uint)(maximumMessageSize + (chunkSize - 1)) / chunkSize,
-                };
 
                 config.TL.RemoteConfig = new TLConfiguration();
                 if (!recvBuf.Decode(out config.TL.RemoteConfig.ProtocolVersion)) { return ErrorParseFail; }
@@ -1717,17 +1747,24 @@ namespace LibUA
                 if (!recvBuf.Decode(out config.TL.RemoteConfig.MaxMessageSize)) { return ErrorParseFail; }
                 if (!recvBuf.Decode(out config.TL.RemoteConfig.MaxChunkCount)) { return ErrorParseFail; }
 
-                config.TL.LocalConfig.SendBufferSize = Math.Min(config.TL.LocalConfig.SendBufferSize, config.TL.RemoteConfig.RecvBufferSize);
+                const uint maxChunkSize = (1 << 16) - 1;
+                uint sendChunkSize = Math.Min(maxChunkSize, config.TL.RemoteConfig.RecvBufferSize);
+                uint recvChunkSize = Math.Min(maxChunkSize, config.TL.RemoteConfig.SendBufferSize);
+
                 if (config.TL.RemoteConfig.MaxMessageSize > 0)
                 {
-                    config.TL.LocalConfig.MaxMessageSize = Math.Min(config.TL.LocalConfig.MaxMessageSize, config.TL.RemoteConfig.MaxMessageSize);
+                    config.TL.RemoteConfig.MaxMessageSize = Math.Min(int.MaxValue, config.TL.RemoteConfig.MaxMessageSize);
+                    maximumMessageSize = Math.Min(maximumMessageSize, (int)config.TL.RemoteConfig.MaxMessageSize);
                 }
-                config.TL.RemoteConfig.MaxMessageSize = config.TL.LocalConfig.MaxMessageSize;
 
-                if (maximumMessageSize > config.TL.LocalConfig.MaxMessageSize)
+                config.TL.LocalConfig = new TLConfiguration()
                 {
-                    maximumMessageSize = (int)config.TL.LocalConfig.MaxMessageSize;
-                }
+                    ProtocolVersion = 0,
+                    SendBufferSize = sendChunkSize,
+                    RecvBufferSize = recvChunkSize,
+                    MaxMessageSize = (uint)maximumMessageSize,
+                    MaxChunkCount = (uint)(maximumMessageSize + (recvChunkSize - 1)) / recvChunkSize,
+                };
 
                 if (!recvBuf.DecodeUAString(out string endpoint)) { return ErrorParseFail; }
                 config.TL.RemoteEndpoint = endpoint;
@@ -2693,6 +2730,15 @@ namespace LibUA
                 return (int)messageSize;
             }
 
+            /// <summary>
+            /// Handles the RegisterNodesRequest from an OPC-UA Client, should handle behavior as per:
+            /// https://reference.opcfoundation.org/Core/Part4/docs/5.8.5
+            /// </summary>
+            /// <param name="config"></param>
+            /// <param name="reqHeader"></param>
+            /// <param name="recvBuf"></param>
+            /// <param name="messageSize"></param>
+            /// <returns></returns>
             protected int DispatchMessage_RegisterNodesRequest(SLChannel config, RequestHeader reqHeader, MemoryBuffer recvBuf, uint messageSize)
             {
                 if (!recvBuf.Decode(out uint noOfNodesToRegister)) { return ErrorParseFail; }
@@ -2703,9 +2749,16 @@ namespace LibUA
                     if (!recvBuf.Decode(out nodesToRegister[i])) { return ErrorParseFail; }
                 }
 
+                StatusCode status = StatusCode.BadNothingToDo;
+                NodeId[] nodesToReturn = new NodeId[] { };
+                if (noOfNodesToRegister > 0)
+                {
+                    (status, nodesToReturn) = app.HandleRegisterNodesRequest(config.Session, nodesToRegister);
+                }
+
                 var respBuf = new MemoryBuffer(maximumMessageSize);
                 bool succeeded = DispatchMessage_WriteHeader(config, respBuf,
-                    (uint)RequestCode.RegisterNodesResponse, reqHeader, (uint)StatusCode.BadNotSupported);
+                    (uint)RequestCode.RegisterNodesResponse, reqHeader, (uint)status);
 
                 if (!succeeded)
                 {
@@ -2713,11 +2766,49 @@ namespace LibUA
                 }
 
                 // NoOfRegisteredNodeIds
-                succeeded &= respBuf.Encode((uint)nodesToRegister.Length);
-                for (int i = 0; i < nodesToRegister.Length && succeeded; i++)
+                succeeded &= respBuf.Encode((UInt32)nodesToReturn.Length);
+                for (int i = 0; i < nodesToReturn.Length && succeeded; i++)
                 {
-                    succeeded &= respBuf.Encode(nodesToRegister[i]);
+                    succeeded &= respBuf.Encode(nodesToReturn[i]);
                 }
+                
+                if (!succeeded)
+                {
+                    return ErrorRespWrite;
+                }
+
+                DispatchMessage_SecureAndSend(config, respBuf);
+                return (int)messageSize;
+            }
+
+            /// <summary>
+            /// Handles the UnregisterNodesRequest from an OPC-UA Client, should handle behavior as per:
+            /// https://reference.opcfoundation.org/Core/Part4/docs/5.8.6
+            /// </summary>
+            /// <param name="config"></param>
+            /// <param name="reqHeader"></param>
+            /// <param name="recvBuf"></param>
+            /// <param name="messageSize"></param>
+            /// <returns></returns>
+            protected int DispatchMessage_UnregisterNodesRequest(SLChannel config, RequestHeader reqHeader, MemoryBuffer recvBuf, uint messageSize)
+            {
+                if (!recvBuf.Decode(out uint noOfNodesToUnregister)) { return ErrorParseFail; }
+
+                var nodesToUnregister = new NodeId[noOfNodesToUnregister];
+                for (uint i = 0; i < noOfNodesToUnregister; i++)
+                {
+                    if (!recvBuf.Decode(out nodesToUnregister[i])) { return ErrorParseFail; }
+                }
+
+                StatusCode status = StatusCode.BadNothingToDo;
+                if (noOfNodesToUnregister > 0)
+                {
+                    status = app.HandleUnregisterNodesRequest(config.Session, nodesToUnregister);
+                }
+
+                var respBuf = new MemoryBuffer(maximumMessageSize);
+                bool succeeded = DispatchMessage_WriteHeader(config, respBuf,
+                    (uint)RequestCode.UnregisterNodesResponse, reqHeader, (uint)status);
 
                 if (!succeeded)
                 {
